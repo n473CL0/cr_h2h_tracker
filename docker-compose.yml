@@ -9,6 +9,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-cr_tracker}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # This line mounts your init script to the auto-seed directory
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "5432:5432"
 
@@ -16,7 +18,6 @@ services:
     build: ./backend
     container_name: cr_tracker_backend
     restart: always
-    # This line loads your .env file into the container
     env_file:
       - .env
     environment:

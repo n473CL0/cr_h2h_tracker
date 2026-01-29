@@ -37,4 +37,4 @@ CREATE INDEX IF NOT EXISTS idx_player_tags ON matches(player_1_tag, player_2_tag
 CREATE INDEX IF NOT EXISTS idx_users_tag ON users(player_tag);
 
 -- Initial Mock Data (Optional)
--- INSERT INTO users (username, player_tag) VALUES ('PlayerOne', 'P0LYG0N');
+-- INSERT INTO users (username, player_tag) VALUES ('PlayerOne', '#P990V0');
