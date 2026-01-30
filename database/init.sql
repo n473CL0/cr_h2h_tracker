@@ -45,7 +45,44 @@ CREATE INDEX IF NOT EXISTS idx_matches_time ON matches(battle_time DESC);
 -- Index for reverse friendship lookups (Who added me?)
 CREATE INDEX IF NOT EXISTS idx_friendships_user_2 ON friendships(user_id_2);
 
--- Note: 'users.player_tag' is already unique, so an explicit index is not needed.
 
--- Initial Mock Data (Optional)
--- INSERT INTO users (username, player_tag) VALUES ('PlayerOne', '#P990V0');
+-- ========================================================
+-- 5. Auth & Viral Features (Added Updates)
+-- ========================================================
+
+-- Update Users: Support Auth & Verified Status
+-- Make player_tag nullable so users can sign up before linking CR account
+ALTER TABLE users ALTER COLUMN player_tag DROP NOT NULL;
+
+-- Add standard auth columns
+ALTER TABLE users 
+    ADD COLUMN IF NOT EXISTS email VARCHAR(255) UNIQUE,
+    ADD COLUMN IF NOT EXISTS hashed_password VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE NOT NULL;
+
+-- Create Invites Table
+-- Manages tokens for viral growth and friend linking
+CREATE TABLE IF NOT EXISTS invites (
+    id SERIAL PRIMARY KEY,
+    token VARCHAR(64) UNIQUE NOT NULL,
+    creator_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    max_uses INTEGER DEFAULT 1,
+    used_count INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_invites_token ON invites(token);
+
+-- Strict Match Constraints
+-- Matches are only saved if BOTH players are registered users
+ALTER TABLE matches 
+    ADD CONSTRAINT fk_matches_player_1 
+    FOREIGN KEY (player_1_tag) 
+    REFERENCES users(player_tag) 
+    ON UPDATE CASCADE;
+
+ALTER TABLE matches 
+    ADD CONSTRAINT fk_matches_player_2 
+    FOREIGN KEY (player_2_tag) 
+    REFERENCES users(player_tag) 
+    ON UPDATE CASCADE;
