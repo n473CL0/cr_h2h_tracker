@@ -57,20 +57,14 @@ const FriendSearchModal = ({ isOpen, onClose, currentUser, onFriendAdded }) => {
 
           const targetTag = result?.status === 'api_found' ? result.tag : null;
           
-          // Generate invite in backend to store the intent
-          await api.createInvite(targetTag, token);
+          const inviteData = await api.createInvite(targetTag, token);
           
-          // --- FIX START: Force IP Address in Link ---
-          // If we are on localhost, swap it for the IP so the link works on mobile
           let baseUrl = window.location.origin;
           if (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
               baseUrl = baseUrl.replace('localhost', '192.168.0.50').replace('127.0.0.1', '192.168.0.50');
           }
           
-          const cleanTag = targetTag ? targetTag.replace('#', '') : '';
-          // We MUST encode the # as %23, otherwise the browser treats it as a fragment
-          const link = `${baseUrl}/register?ref=%23${cleanTag}`;
-          // --- FIX END ---
+          const link = `${baseUrl}/register?ref=${inviteData.token}`;
           
           setInviteLink(link);
 
@@ -93,11 +87,45 @@ const FriendSearchModal = ({ isOpen, onClose, currentUser, onFriendAdded }) => {
       }
   };
 
-  const copyToClipboard = () => {
-      if (inviteLink) {
-          navigator.clipboard.writeText(inviteLink);
-          setCopied(true);
+  // FIX: Robust copy function with fallback for HTTP (Insecure Context)
+  const copyToClipboard = async () => {
+      if (!inviteLink) return;
+
+      try {
+          // 1. Try Modern API (Only works on HTTPS or localhost)
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(inviteLink);
+              setCopied(true);
+          } else {
+              // 2. Fallback for HTTP LAN testing (insecure context)
+              // Create a hidden text area, select it, and run the legacy copy command
+              const textArea = document.createElement("textarea");
+              textArea.value = inviteLink;
+              
+              // Ensure it's not visible to the user but part of the DOM
+              textArea.style.position = "fixed";
+              textArea.style.left = "-9999px";
+              textArea.style.top = "0";
+              document.body.appendChild(textArea);
+              
+              textArea.focus();
+              textArea.select();
+              
+              try {
+                  const successful = document.execCommand('copy');
+                  if (successful) setCopied(true);
+                  else alert("Could not auto-copy. Please copy the link manually.");
+              } catch (err) {
+                  console.error("Fallback copy failed", err);
+              }
+              
+              document.body.removeChild(textArea);
+          }
+          
           setTimeout(() => setCopied(false), 2000);
+
+      } catch (err) {
+          console.error("Copy failed", err);
       }
   };
 

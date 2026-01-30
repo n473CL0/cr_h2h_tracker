@@ -78,9 +78,11 @@ export const api = {
     return response.data;
   },
 
-  syncBattles: async (playerTag) => {
-    const cleanTag = playerTag.replace('#', '%23');
-    const response = await client.post(`/sync/${cleanTag}`);
+  syncBattles: async (playerTag, token) => {
+    const cleanTag = playerTag.replace('#', '');
+    const response = await client.post(`/sync/${cleanTag}`, {}, {
+      headers: getAuthHeader(token)
+    });
     return response.data;
   },
 

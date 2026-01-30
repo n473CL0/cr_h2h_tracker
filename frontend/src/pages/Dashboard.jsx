@@ -21,17 +21,21 @@ const Dashboard = ({ user, token, onLogout }) => {
       const [matchData, friendData, userData] = await Promise.all([
         api.getMatches(user.player_tag, token),
         api.getFriends(user.id, token),
-        api.getMe(token) // Refresh profile data
+        api.getMe(token)
       ]);
       setMatches(matchData);
       setFriends(friendData);
       setCurrentUser(userData);
     } catch (err) {
       console.error("Fetch error:", err);
+      // ADD THIS: Logout if token is invalid
+      if (err.response && err.response.status === 401) {
+        onLogout();
+      }
     } finally {
       setLoading(false);
     }
-  }, [user, token]);
+  }, [user.player_tag, user.id, token, onLogout]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -72,14 +76,14 @@ const Dashboard = ({ user, token, onLogout }) => {
             {/* NEW: Player Profile Card */}
             <PlayerProfileCard user={currentUser} />
 
-            <div className="bg-slate-800/50 rounded-2xl border border-slate-700 p-6">
+            {/* <div className="bg-slate-800/50 rounded-2xl border border-slate-700 p-6">
                 <h2 className="text-xl font-bold text-white mb-4">Your Performance</h2>
                 {loading ? (
                     <div className="h-24 flex items-center justify-center text-slate-500">Loading stats...</div>
                 ) : (
                     <StatCard matches={matches} playerTag={user.player_tag} />
                 )}
-            </div>
+            </div> */}
             
             <div className="bg-blue-900/10 border border-blue-500/20 rounded-xl p-4 text-center">
                 <p className="text-blue-400 text-sm">
