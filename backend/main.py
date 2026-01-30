@@ -5,13 +5,14 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from fastapi import FastAPI, Depends, HTTPException, status, Body
+from fastapi import FastAPI, Depends, HTTPException, status, Body, BackgroundTasks
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from passlib.context import CryptContext
 from jose import JWTError, jwt
+from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
 
 import models, schemas, database
 
@@ -21,6 +22,19 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 
 CR_API_KEY = os.getenv("CR_API_KEY")
 API_BASE = "https://api.clashroyale.com/v1"
+
+# Mail Configuration
+conf = ConnectionConfig(
+    MAIL_USERNAME = os.getenv("MAIL_USERNAME", "your_email@gmail.com"),
+    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "your_app_password"),
+    MAIL_FROM = os.getenv("MAIL_FROM", "noreply@clashfriends.com"),
+    MAIL_PORT = int(os.getenv("MAIL_PORT", 587)),
+    MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.gmail.com"),
+    MAIL_STARTTLS = True,
+    MAIL_SSL_TLS = False,
+    USE_CREDENTIALS = True,
+    VALIDATE_CERTS = True
+)
 
 models.Base.metadata.create_all(bind=database.engine)
 app = FastAPI(title="ClashFriends API")
@@ -47,6 +61,12 @@ def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def create_reset_token(email: str):
+    # Short lived token for password resets (15 mins)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+    to_encode = {"sub": email, "type": "reset", "exp": expire}
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def get_db():
@@ -182,6 +202,13 @@ async def start_periodic_sync():
 
 @app.post("/auth/signup", response_model=schemas.UserResponse)
 def signup(user: schemas.UserSignup, db: Session = Depends(get_db)):
+    if not user.invite_token:
+        raise HTTPException(status_code=403, detail="Registration is invite-only.")
+
+    invite = db.query(models.Invite).filter(models.Invite.token == user.invite_token).first()
+    if not invite:
+        raise HTTPException(status_code=400, detail="Invalid invite token.")
+
     if db.query(models.User).filter(models.User.email == user.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
     
@@ -217,16 +244,13 @@ def signup(user: schemas.UserSignup, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
     
-    if formatted_tag:
-        invites = db.query(models.Invite).filter(models.Invite.target_tag == formatted_tag).all()
-        for invite in invites:
-             uid1, uid2 = sorted([new_user.id, invite.creator_id])
-             if uid1 != uid2:
-                 if not db.query(models.Friendship).filter_by(user_id_1=uid1, user_id_2=uid2).first():
-                     friendship = models.Friendship(user_id_1=uid1, user_id_2=uid2)
-                     db.add(friendship)
-                     invite.used_count += 1
-        db.commit()
+    uid1, uid2 = sorted([new_user.id, invite.creator_id])
+    if uid1 != uid2:
+        if not db.query(models.Friendship).filter_by(user_id_1=uid1, user_id_2=uid2).first():
+            friendship = models.Friendship(user_id_1=uid1, user_id_2=uid2)
+            db.add(friendship)
+            invite.used_count += 1
+            db.commit()
 
     return new_user
 
@@ -242,6 +266,67 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     
     access_token = create_access_token(data={"sub": user.email, "id": user.id})
     return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/auth/forgot-password")
+async def forgot_password(
+    req: schemas.PasswordResetRequest, 
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    user = db.query(models.User).filter(models.User.email == req.email).first()
+    # We always return success to prevent email enumeration
+    if not user:
+        return {"message": "If this email is registered, a reset link has been sent."}
+    
+    reset_token = create_reset_token(req.email)
+    
+    # In production, change this to your actual domain
+    base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    if "192.168" in base_url or "localhost" in base_url:
+        # Helper for local dev if env not set perfectly
+        pass 
+        
+    reset_link = f"{base_url}/reset-password?token={reset_token}"
+    
+    message = MessageSchema(
+        subject="ClashFriends Password Reset",
+        recipients=[req.email],
+        body=f"""
+        <p>Hello {user.username},</p>
+        <p>You requested a password reset. Click the link below to set a new password:</p>
+        <p><a href="{reset_link}">Reset Password</a></p>
+        <p>This link expires in 15 minutes.</p>
+        <p>If you did not request this, please ignore this email.</p>
+        """,
+        subtype=MessageType.html
+    )
+
+    fm = FastMail(conf)
+    background_tasks.add_task(fm.send_message, message)
+    
+    return {"message": "If this email is registered, a reset link has been sent."}
+
+@app.post("/auth/reset-password")
+def reset_password(req: schemas.PasswordResetConfirm, db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(req.token, SECRET_KEY, algorithms=[ALGORITHM])
+        email = payload.get("sub")
+        token_type = payload.get("type")
+        
+        if not email or token_type != "reset":
+            raise HTTPException(status_code=400, detail="Invalid token")
+            
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+        
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    user.hashed_password = get_password_hash(req.new_password)
+    db.commit()
+    
+    return {"message": "Password updated successfully"}
 
 # --- Sync Endpoint ---
 
@@ -273,16 +358,16 @@ async def manual_sync_battles(player_tag: str, db: Session = Depends(get_db)):
 
 @app.get("/invites/{tag_or_token}", response_model=schemas.InviteResponse)
 def get_invite_details(tag_or_token: str, db: Session = Depends(get_db)):
-    formatted = tag_or_token.upper()
-    if not formatted.startswith("#"): 
-        formatted = f"#{formatted}"
+    # Prioritize strict Token lookup
+    invite = db.query(models.Invite).filter(models.Invite.token == tag_or_token).first()
+    
+    if not invite:
+        # Fallback for legacy behavior
+        formatted = tag_or_token.upper()
+        if not formatted.startswith("#"): 
+            formatted = f"#{formatted}"
         
-    invite = db.query(models.Invite).filter(
-        or_(
-            models.Invite.target_tag == formatted,
-            models.Invite.token == tag_or_token
-        )
-    ).first()
+        invite = db.query(models.Invite).filter(models.Invite.target_tag == formatted).first()
     
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
