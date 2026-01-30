@@ -60,10 +60,17 @@ const FriendSearchModal = ({ isOpen, onClose, currentUser, onFriendAdded }) => {
           // Generate invite in backend to store the intent
           await api.createInvite(targetTag, token);
           
-          // Construct the NEW URL format
-          // Format: /register?ref=#TAG
+          // --- FIX START: Force IP Address in Link ---
+          // If we are on localhost, swap it for the IP so the link works on mobile
+          let baseUrl = window.location.origin;
+          if (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
+              baseUrl = baseUrl.replace('localhost', '192.168.0.50').replace('127.0.0.1', '192.168.0.50');
+          }
+          
           const cleanTag = targetTag ? targetTag.replace('#', '') : '';
-          const link = `${window.location.origin}/register?ref=%23${cleanTag}`;
+          // We MUST encode the # as %23, otherwise the browser treats it as a fragment
+          const link = `${baseUrl}/register?ref=%23${cleanTag}`;
+          // --- FIX END ---
           
           setInviteLink(link);
 
@@ -75,7 +82,7 @@ const FriendSearchModal = ({ isOpen, onClose, currentUser, onFriendAdded }) => {
                       url: link,
                   });
               } catch (err) {
-                  // User cancelled
+                  // User cancelled share
               }
           }
       } catch(err) {
@@ -123,7 +130,6 @@ const FriendSearchModal = ({ isOpen, onClose, currentUser, onFriendAdded }) => {
 
           {result && (
               <div className="bg-slate-700/50 border border-slate-600 rounded-xl p-4">
-                  {/* CASE 1: Already a friend */}
                   {result.status === 'friend' && (
                       <div className="flex items-center gap-3 text-green-400">
                           <Check className="w-5 h-5" />
@@ -134,7 +140,6 @@ const FriendSearchModal = ({ isOpen, onClose, currentUser, onFriendAdded }) => {
                       </div>
                   )}
 
-                  {/* CASE 2: User found in DB, can add */}
                   {result.status === 'user_found' && (
                       <div className="flex items-center justify-between">
                           <div>
@@ -147,7 +152,6 @@ const FriendSearchModal = ({ isOpen, onClose, currentUser, onFriendAdded }) => {
                       </div>
                   )}
 
-                  {/* CASE 3: Found in API (Unregistered) OR Not Found -> Invite */}
                   {(result.status === 'api_found' || result.status === 'not_found') && (
                       <div className="text-center">
                            <div className="mb-4">

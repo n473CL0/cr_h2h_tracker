@@ -13,7 +13,7 @@ function App() {
 
   useEffect(() => {
     const init = async () => {
-      // 1. Check for NEW Invite Link Format: /register?ref=#TAG
+      // 1. Check for Invite Link Format: /register?ref=#TAG
       const params = new URLSearchParams(window.location.search);
       const refTag = params.get('ref');
       const isRegisterPath = window.location.pathname === '/register';
@@ -23,11 +23,9 @@ function App() {
             // Encode the hash # properly for the API call
             const safeTag = refTag.replace('#', '%23'); 
             const data = await api.getInvite(safeTag);
-            
-            // data will contain { target_tag, creator_username, etc }
             setInviteData(data);
             
-            // Clean URL
+            // Clean URL to avoid re-triggering
             window.history.replaceState({}, document.title, "/");
         } catch (err) {
             console.error("Invalid invite ref", err);
@@ -71,8 +69,7 @@ function App() {
     return <div className="h-screen flex items-center justify-center bg-slate-900 text-blue-500"><Loader2 className="animate-spin w-8 h-8"/></div>;
   }
 
-  // If user is not logged in, show UserForm (Sign In / Register)
-  // If we have inviteData, UserForm will default to "Register" mode
+  // If we have inviteData, UserForm handles the "Register" mode automatically
   if (!token || !user) {
     return <UserForm onLogin={handleLoginSuccess} inviteData={inviteData} />;
   }
