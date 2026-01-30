@@ -83,7 +83,7 @@ const Dashboard = ({ user, onLogout }) => {
         isOpen={isSearchOpen} 
         onClose={() => setIsSearchOpen(false)} 
         currentUser={user} 
-        onFriendAdded={fetchData} 
+        onFriendAdded={fetchData}
       />
     </div>
   );

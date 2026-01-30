@@ -28,7 +28,10 @@ def get_headers():
     return {"Authorization": f"Bearer {CR_API_KEY}"}
 
 def generate_battle_id(battle_time: str, p1_tag: str, p2_tag: str) -> str:
-    tags = sorted([p1_tag, p2_tag])
+    # Strip # and uppercase to ensure consistent hashing
+    t1 = p1_tag.replace("#", "").upper()
+    t2 = p2_tag.replace("#", "").upper()
+    tags = sorted([t1, t2])
     raw_string = f"{battle_time}-{tags[0]}-{tags[1]}"
     return hashlib.md5(raw_string.encode()).hexdigest()
 
@@ -96,22 +99,45 @@ def get_player_matches(player_tag: str, db: Session = Depends(database.get_db)):
 @app.post("/sync/{player_tag}")
 def sync_battles(player_tag: str, db: Session = Depends(database.get_db)):
     clean_tag = player_tag.replace("#", "%23")
-    response = requests.get(f"{API_BASE}/players/{clean_tag}/battlelog", headers=get_headers())
-    battles = response.json()
+    url = f"{API_BASE}/players/{clean_tag}/battlelog"
+    
+    try:
+        response = requests.get(url, headers=get_headers())
+        battles = response.json()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
     saved_count = 0
     for b in battles:
-        if b.get("type") not in ["PvP", "2v2", "ClanWar"]: continue
-        p1_tag, p2_tag = b["team"][0]["tag"], b["opponent"][0]["tag"]
-        battle_id = generate_battle_id(b["battleTime"], p1_tag, p2_tag)
-        if db.query(models.Match).filter(models.Match.battle_id == battle_id).first(): continue
-        match_record = models.Match(
-            battle_id=battle_id, player_1_tag=p1_tag, player_2_tag=p2_tag,
-            winner_tag=p1_tag if b["team"][0]["crowns"] > b["opponent"][0]["crowns"] else (p2_tag if b["opponent"][0]["crowns"] > b["team"][0]["crowns"] else None),
-            battle_time=datetime.strptime(b["battleTime"], "%Y%m%dT%H%M%S.%fZ"),
-            game_mode=b["type"], crowns_1=b["team"][0]["crowns"], crowns_2=b["opponent"][0]["crowns"]
-        )
-        db.add(match_record)
-        saved_count += 1
+        # REMOVED: if b.get("type") not in ["PvP", "2v2", "ClanWar"]: continue
+        # This now allows all match types (friendly, tournaments, etc.) to be saved
+            
+        try:
+            p1_tag = b["team"][0]["tag"]
+            p2_tag = b["opponent"][0]["tag"]
+            
+            battle_time_str = b["battleTime"]
+            battle_id = generate_battle_id(battle_time_str, p1_tag, p2_tag)
+
+            if db.query(models.Match).filter(models.Match.battle_id == battle_id).first():
+                continue
+
+            match_record = models.Match(
+                battle_id=battle_id,
+                player_1_tag=p1_tag,
+                player_2_tag=p2_tag,
+                winner_tag=p1_tag if b["team"][0]["crowns"] > b["opponent"][0]["crowns"] else (p2_tag if b["opponent"][0]["crowns"] > b["team"][0]["crowns"] else None),
+                battle_time=datetime.strptime(battle_time_str, "%Y%m%dT%H%M%S.%fZ"),
+                game_mode=b.get("type", "Unknown"), # Captures the specific mode for the UI
+                crowns_1=b["team"][0]["crowns"],
+                crowns_2=b["opponent"][0]["crowns"]
+            )
+            
+            db.add(match_record)
+            saved_count += 1
+        except (KeyError, IndexError):
+            continue
+
     db.commit()
     return {"status": "success", "new_matches_synced": saved_count}
 
