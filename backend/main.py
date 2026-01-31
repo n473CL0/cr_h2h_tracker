@@ -52,15 +52,15 @@ app = FastAPI(title="ClashFriends API")
 
 # CORS Security
 origins = [
-    FRONTEND_URL,
     "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://clashfriends-frontend.up.railway.app" # Add your railway frontend domain variants if unsure
+    "https://diligent-creativity-production-045b.up.railway.app",
+    "https://clashfriends.com",
+    "https://www.clashfriends.com" 
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Temporarily set to * to debug connection, then restrict to 'origins'
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
