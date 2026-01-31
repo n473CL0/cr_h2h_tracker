@@ -16,6 +16,7 @@ from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
 
 import models, schemas, database
 
+<<<<<<< HEAD
 # --- Configuration & Secrets Management ---
 def get_env_variable(var_name: str, default: str = None, required: bool = False):
     value = os.getenv(var_name, default)
@@ -29,12 +30,24 @@ FRONTEND_URL = get_env_variable("FRONTEND_URL", "http://localhost:3000")
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 
+=======
+# --- Configuration ---
+SECRET_KEY = os.getenv("SECRET_KEY", "dev_secret_key_change_me")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 
+CR_API_KEY = os.getenv("CR_API_KEY")
+>>>>>>> parent of c7749a0 (backend restructuring)
 API_BASE = "https://api.clashroyale.com/v1"
 
 # Mail Configuration
 conf = ConnectionConfig(
+<<<<<<< HEAD
     MAIL_USERNAME = os.getenv("MAIL_USERNAME", "no_mail_configured"),
     MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", ""),
+=======
+    MAIL_USERNAME = os.getenv("MAIL_USERNAME", "your_email@gmail.com"),
+    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "your_app_password"),
+>>>>>>> parent of c7749a0 (backend restructuring)
     MAIL_FROM = os.getenv("MAIL_FROM", "noreply@clashfriends.com"),
     MAIL_PORT = int(os.getenv("MAIL_PORT", 587)),
     MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.gmail.com"),
@@ -47,6 +60,7 @@ conf = ConnectionConfig(
 models.Base.metadata.create_all(bind=database.engine)
 app = FastAPI(title="ClashFriends API")
 
+<<<<<<< HEAD
 # --- Security: CORS ---
 # Only allow requests from the specific Frontend URL (and localhost for dev)
 origins = [
@@ -58,6 +72,11 @@ origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins, 
+=======
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+>>>>>>> parent of c7749a0 (backend restructuring)
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -80,6 +99,10 @@ def create_access_token(data: dict):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def create_reset_token(email: str):
+<<<<<<< HEAD
+=======
+    # Short lived token for password resets (15 mins)
+>>>>>>> parent of c7749a0 (backend restructuring)
     expire = datetime.now(timezone.utc) + timedelta(minutes=15)
     to_encode = {"sub": email, "type": "reset", "exp": expire}
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -92,10 +115,13 @@ def get_db():
         db.close()
 
 def fetch_cr_player(tag: str):
+<<<<<<< HEAD
     if not CR_API_KEY:
         print("⚠️ CR_API_KEY missing. Cannot fetch player data.")
         return None
         
+=======
+>>>>>>> parent of c7749a0 (backend restructuring)
     clean_tag = tag.replace("#", "%23")
     try:
         resp = requests.get(f"{API_BASE}/players/{clean_tag}", headers={"Authorization": f"Bearer {CR_API_KEY}"})
@@ -131,17 +157,26 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         raise credentials_exception
     return user
 
+<<<<<<< HEAD
 # --- Core Sync Logic (Production Optimized) ---
 
 async def sync_matches_for_user(db: Session, user: models.User, registered_tags: set):
     if not user.player_tag or not CR_API_KEY:
         return False
+=======
+# --- Core Sync Logic ---
+
+async def sync_matches_for_user(db: Session, user: models.User, registered_tags: set):
+    if not user.player_tag:
+        return
+>>>>>>> parent of c7749a0 (backend restructuring)
 
     headers = {"Authorization": f"Bearer {CR_API_KEY}"}
     clean_tag = user.player_tag.replace("#", "%23")
     url = f"{API_BASE}/players/{clean_tag}/battlelog"
     
     try:
+<<<<<<< HEAD
         response = await asyncio.to_thread(requests.get, url, headers=headers, timeout=10)
         
         if response.status_code == 429:
@@ -150,6 +185,11 @@ async def sync_matches_for_user(db: Session, user: models.User, registered_tags:
 
         if response.status_code != 200:
             return False
+=======
+        response = await asyncio.to_thread(requests.get, url, headers=headers)
+        if response.status_code != 200:
+            return
+>>>>>>> parent of c7749a0 (backend restructuring)
         
         battles = response.json()
         
@@ -187,6 +227,7 @@ async def sync_matches_for_user(db: Session, user: models.User, registered_tags:
                     crowns_2=crowns_2
                 )
                 db.add(match_record)
+<<<<<<< HEAD
             except (KeyError, IndexError):
                 continue
         
@@ -197,6 +238,15 @@ async def sync_matches_for_user(db: Session, user: models.User, registered_tags:
         print(f"Error syncing {user.username}: {e}")
         db.rollback()
         return False
+=======
+            except (KeyError, IndexError) as e:
+                continue
+        
+        db.commit()
+            
+    except Exception as e:
+        db.rollback()
+>>>>>>> parent of c7749a0 (backend restructuring)
 
 async def run_sync_cycle(db: Session):
     users_with_tags = db.query(models.User).filter(models.User.player_tag.isnot(None)).all()
@@ -204,6 +254,7 @@ async def run_sync_cycle(db: Session):
         return
         
     registered_tags = {u.player_tag for u in users_with_tags}
+<<<<<<< HEAD
     print(f"🔄 Starting Batch Sync for {len(users_with_tags)} users...")
     
     for user in users_with_tags:
@@ -214,18 +265,30 @@ async def run_sync_cycle(db: Session):
         
         # Throttling to respect API Limits
         await asyncio.sleep(0.5)
+=======
+    
+    for user in users_with_tags:
+        await sync_matches_for_user(db, user, registered_tags)
+>>>>>>> parent of c7749a0 (backend restructuring)
 
 @app.on_event("startup")
 async def start_periodic_sync():
     async def loop():
+<<<<<<< HEAD
         await asyncio.sleep(5) # Grace period
+=======
+>>>>>>> parent of c7749a0 (backend restructuring)
         while True:
             print("🔄 Starting Background Sync...")
             db = database.SessionLocal()
             try:
                 await run_sync_cycle(db)
             except Exception as e:
+<<<<<<< HEAD
                 print(f"Background Sync Fatal Error: {e}")
+=======
+                print(f"Background Sync Failed: {e}")
+>>>>>>> parent of c7749a0 (backend restructuring)
             finally:
                 db.close()
             print("✅ Sync Complete. Sleeping 30 mins.")
@@ -309,31 +372,57 @@ async def forgot_password(
     db: Session = Depends(get_db)
 ):
     user = db.query(models.User).filter(models.User.email == req.email).first()
+<<<<<<< HEAD
+=======
+    # We always return success to prevent email enumeration
+>>>>>>> parent of c7749a0 (backend restructuring)
     if not user:
         return {"message": "If this email is registered, a reset link has been sent."}
     
     reset_token = create_reset_token(req.email)
     
+<<<<<<< HEAD
     # SECURITY: Use the environment variable, do not assume localhost
     reset_link = f"{FRONTEND_URL}/reset-password?token={reset_token}"
+=======
+    # In production, change this to your actual domain
+    base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    if "192.168" in base_url or "localhost" in base_url:
+        # Helper for local dev if env not set perfectly
+        pass 
+        
+    reset_link = f"{base_url}/reset-password?token={reset_token}"
+>>>>>>> parent of c7749a0 (backend restructuring)
     
     message = MessageSchema(
         subject="ClashFriends Password Reset",
         recipients=[req.email],
         body=f"""
         <p>Hello {user.username},</p>
+<<<<<<< HEAD
         <p>Click below to reset your password:</p>
         <p><a href="{reset_link}">Reset Password</a></p>
         <p>Link expires in 15 minutes.</p>
+=======
+        <p>You requested a password reset. Click the link below to set a new password:</p>
+        <p><a href="{reset_link}">Reset Password</a></p>
+        <p>This link expires in 15 minutes.</p>
+        <p>If you did not request this, please ignore this email.</p>
+>>>>>>> parent of c7749a0 (backend restructuring)
         """,
         subtype=MessageType.html
     )
 
+<<<<<<< HEAD
     try:
         fm = FastMail(conf)
         background_tasks.add_task(fm.send_message, message)
     except Exception as e:
         print(f"Mail Error: {e}")
+=======
+    fm = FastMail(conf)
+    background_tasks.add_task(fm.send_message, message)
+>>>>>>> parent of c7749a0 (backend restructuring)
     
     return {"message": "If this email is registered, a reset link has been sent."}
 
@@ -356,11 +445,18 @@ def reset_password(req: schemas.PasswordResetConfirm, db: Session = Depends(get_
         
     user.hashed_password = get_password_hash(req.new_password)
     db.commit()
+<<<<<<< HEAD
     return {"message": "Password updated successfully"}
 
 # --- Sync Endpoint (With Cooldown) ---
 
 manual_sync_cooldowns = {}
+=======
+    
+    return {"message": "Password updated successfully"}
+
+# --- Sync Endpoint ---
+>>>>>>> parent of c7749a0 (backend restructuring)
 
 @app.post("/sync/{player_tag}")
 async def manual_sync_battles(player_tag: str, db: Session = Depends(get_db)):
@@ -368,16 +464,23 @@ async def manual_sync_battles(player_tag: str, db: Session = Depends(get_db)):
     if not formatted_tag.startswith("#"):
         formatted_tag = f"#{formatted_tag}"
         
+<<<<<<< HEAD
     last_sync = manual_sync_cooldowns.get(formatted_tag)
     if last_sync and datetime.now() - last_sync < timedelta(minutes=2):
         raise HTTPException(status_code=429, detail="Please wait 2 minutes before syncing again.")
 
+=======
+>>>>>>> parent of c7749a0 (backend restructuring)
     user = db.query(models.User).filter(models.User.player_tag == formatted_tag).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
         
+<<<<<<< HEAD
     manual_sync_cooldowns[formatted_tag] = datetime.now()
         
+=======
+    # Also refresh profile data (trophies/clan) during sync
+>>>>>>> parent of c7749a0 (backend restructuring)
     cr_data = fetch_cr_player(formatted_tag)
     if cr_data:
         user.username = cr_data.get("name", user.username)
@@ -391,6 +494,7 @@ async def manual_sync_battles(player_tag: str, db: Session = Depends(get_db)):
     await sync_matches_for_user(db, user, registered_tags)
     return {"status": "success"}
 
+<<<<<<< HEAD
 # --- Invites & Search Endpoints ---
 
 @app.get("/invites/{tag_or_token}", response_model=schemas.InviteResponse)
@@ -401,6 +505,21 @@ def get_invite_details(tag_or_token: str, db: Session = Depends(get_db)):
         formatted = tag_or_token.upper()
         if not formatted.startswith("#"): 
             formatted = f"#{formatted}"
+=======
+# --- Invite & Search Endpoints ---
+
+@app.get("/invites/{tag_or_token}", response_model=schemas.InviteResponse)
+def get_invite_details(tag_or_token: str, db: Session = Depends(get_db)):
+    # Prioritize strict Token lookup
+    invite = db.query(models.Invite).filter(models.Invite.token == tag_or_token).first()
+    
+    if not invite:
+        # Fallback for legacy behavior
+        formatted = tag_or_token.upper()
+        if not formatted.startswith("#"): 
+            formatted = f"#{formatted}"
+        
+>>>>>>> parent of c7749a0 (backend restructuring)
         invite = db.query(models.Invite).filter(models.Invite.target_tag == formatted).first()
     
     if not invite:
@@ -419,6 +538,7 @@ def create_invite(
     db: Session = Depends(get_db)
 ):
     import secrets
+<<<<<<< HEAD
     target_tag = None
     if req.target_tag:
         target_tag = req.target_tag.upper()
@@ -432,6 +552,40 @@ def create_invite(
     db.add(invite)
     db.commit()
     return {"token": token, "target_tag": target_tag, "creator_username": current_user.username}
+=======
+    
+    target_tag = None
+    if req.target_tag:
+        target_tag = req.target_tag.upper()
+        if not target_tag.startswith("#"):
+            target_tag = f"#{target_tag}"
+            
+        existing = db.query(models.Invite).filter_by(
+            creator_id=current_user.id, 
+            target_tag=target_tag
+        ).first()
+        if existing:
+             return {
+                "token": existing.token,
+                "target_tag": existing.target_tag,
+                "creator_username": current_user.username
+            }
+    
+    token = secrets.token_urlsafe(8)
+    invite = models.Invite(
+        token=token, 
+        creator_id=current_user.id,
+        target_tag=target_tag,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24)
+    )
+    db.add(invite)
+    db.commit()
+    return {
+        "token": token, 
+        "target_tag": target_tag,
+        "creator_username": current_user.username
+    }
+>>>>>>> parent of c7749a0 (backend restructuring)
 
 @app.get("/search/player")
 def search_player(
@@ -454,7 +608,16 @@ def search_player(
 
     cr_data = fetch_cr_player(tag)
     if cr_data:
+<<<<<<< HEAD
         return {"status": "api_found", "tag": tag, "name": cr_data.get("name"), "can_invite": True}
+=======
+        return {
+            "status": "api_found",
+            "tag": tag,
+            "name": cr_data.get("name"),
+            "can_invite": True
+        }
+>>>>>>> parent of c7749a0 (backend restructuring)
 
     return {"status": "not_found", "can_invite": False}
 
@@ -465,7 +628,12 @@ def link_player_tag(
     db: Session = Depends(get_db)
 ):
     formatted_tag = req.player_tag.upper()
+<<<<<<< HEAD
     if not formatted_tag.startswith("#"): formatted_tag = f"#{formatted_tag}"
+=======
+    if not formatted_tag.startswith("#"):
+        formatted_tag = f"#{formatted_tag}"
+>>>>>>> parent of c7749a0 (backend restructuring)
         
     existing = db.query(models.User).filter(models.User.player_tag == formatted_tag).first()
     if existing and existing.id != current_user.id:
@@ -477,6 +645,10 @@ def link_player_tag(
 
     current_user.player_tag = formatted_tag
     current_user.username = cr_data.get("name", current_user.username)
+<<<<<<< HEAD
+=======
+    # Save profile data
+>>>>>>> parent of c7749a0 (backend restructuring)
     current_user.trophies = cr_data.get("trophies", 0)
     current_user.clan_name = cr_data.get("clan", {}).get("name")
     
@@ -489,10 +661,24 @@ def read_users_me(current_user: models.User = Depends(get_current_user)):
     return current_user
 
 @app.get("/matches", response_model=List[schemas.MatchResponse])
+<<<<<<< HEAD
 def get_my_matches(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not current_user.player_tag: return []
     return db.query(models.Match).filter(
         or_(models.Match.player_1_tag == current_user.player_tag, models.Match.player_2_tag == current_user.player_tag)
+=======
+def get_my_matches(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if not current_user.player_tag:
+        return []
+    return db.query(models.Match).filter(
+        or_(
+            models.Match.player_1_tag == current_user.player_tag,
+            models.Match.player_2_tag == current_user.player_tag
+        )
+>>>>>>> parent of c7749a0 (backend restructuring)
     ).order_by(models.Match.battle_time.desc()).limit(50).all()
 
 @app.post("/friends/add")
@@ -503,8 +689,15 @@ def add_friend_internal(
 ):
     target_id = payload.get("user_id_2")
     uid1, uid2 = sorted([current_user.id, target_id])
+<<<<<<< HEAD
     if db.query(models.Friendship).filter_by(user_id_1=uid1, user_id_2=uid2).first():
         return {"status": "already_friends"}
+=======
+    
+    if db.query(models.Friendship).filter_by(user_id_1=uid1, user_id_2=uid2).first():
+        return {"status": "already_friends"}
+        
+>>>>>>> parent of c7749a0 (backend restructuring)
     new_friendship = models.Friendship(user_id_1=uid1, user_id_2=uid2)
     db.add(new_friendship)
     db.commit()
@@ -512,7 +705,23 @@ def add_friend_internal(
 
 @app.get("/users/{user_id}/friends")
 def get_friends_list(user_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+<<<<<<< HEAD
     if user_id != current_user.id: raise HTTPException(status_code=403, detail="Not authorized")
     fs = db.query(models.Friendship).filter(or_(models.Friendship.user_id_1 == user_id, models.Friendship.user_id_2 == user_id)).all()
     friend_ids = [f.user_id_2 if f.user_id_1 == user_id else f.user_id_1 for f in fs]
     return db.query(models.User).filter(models.User.id.in_(friend_ids)).all()
+=======
+    if user_id != current_user.id:
+         raise HTTPException(status_code=403, detail="Not authorized")
+    
+    fs = db.query(models.Friendship).filter(
+        or_(models.Friendship.user_id_1 == user_id, models.Friendship.user_id_2 == user_id)
+    ).all()
+    
+    friend_ids = []
+    for f in fs:
+        friend_ids.append(f.user_id_2 if f.user_id_1 == user_id else f.user_id_1)
+        
+    friends = db.query(models.User).filter(models.User.id.in_(friend_ids)).all()
+    return friends
+>>>>>>> parent of c7749a0 (backend restructuring)
