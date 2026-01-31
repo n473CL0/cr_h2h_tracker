@@ -16,17 +16,25 @@ from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
 
 import models, schemas, database
 
-# --- Configuration ---
-SECRET_KEY = os.getenv("SECRET_KEY", "dev_secret_key_change_me")
+# --- Configuration & Secrets Management ---
+def get_env_variable(var_name: str, default: str = None, required: bool = False):
+    value = os.getenv(var_name, default)
+    if required and not value:
+        raise ValueError(f"CRITICAL: Environment variable {var_name} is missing.")
+    return value
+
+SECRET_KEY = get_env_variable("SECRET_KEY", "dev_unsafe_secret", required=False)
+CR_API_KEY = get_env_variable("CR_API_KEY", required=False) # Warning: Sync won't work without this
+FRONTEND_URL = get_env_variable("FRONTEND_URL", "http://localhost:3000")
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 
-CR_API_KEY = os.getenv("CR_API_KEY")
 API_BASE = "https://api.clashroyale.com/v1"
 
 # Mail Configuration
 conf = ConnectionConfig(
-    MAIL_USERNAME = os.getenv("MAIL_USERNAME", "your_email@gmail.com"),
-    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "your_app_password"),
+    MAIL_USERNAME = os.getenv("MAIL_USERNAME", "no_mail_configured"),
+    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", ""),
     MAIL_FROM = os.getenv("MAIL_FROM", "noreply@clashfriends.com"),
     MAIL_PORT = int(os.getenv("MAIL_PORT", 587)),
     MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.gmail.com"),
@@ -39,16 +47,22 @@ conf = ConnectionConfig(
 models.Base.metadata.create_all(bind=database.engine)
 app = FastAPI(title="ClashFriends API")
 
-# Fetch the allowed origin from environment variables
-ORIGINS = [os.getenv("FRONTEND_URL", "http://localhost:3000")]
+# --- Security: CORS ---
+# Only allow requests from the specific Frontend URL (and localhost for dev)
+origins = [
+    FRONTEND_URL,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ORIGINS, # Restrict to your frontend
+    allow_origins=origins, 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
@@ -66,7 +80,6 @@ def create_access_token(data: dict):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def create_reset_token(email: str):
-    # Short lived token for password resets (15 mins)
     expire = datetime.now(timezone.utc) + timedelta(minutes=15)
     to_encode = {"sub": email, "type": "reset", "exp": expire}
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -79,6 +92,10 @@ def get_db():
         db.close()
 
 def fetch_cr_player(tag: str):
+    if not CR_API_KEY:
+        print("⚠️ CR_API_KEY missing. Cannot fetch player data.")
+        return None
+        
     clean_tag = tag.replace("#", "%23")
     try:
         resp = requests.get(f"{API_BASE}/players/{clean_tag}", headers={"Authorization": f"Bearer {CR_API_KEY}"})
@@ -114,13 +131,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         raise credentials_exception
     return user
 
-# --- Core Sync Logic ---
+# --- Core Sync Logic (Production Optimized) ---
 
 async def sync_matches_for_user(db: Session, user: models.User, registered_tags: set):
-    """
-    Returns True if sync succeeded, False if failed.
-    """
-    if not user.player_tag:
+    if not user.player_tag or not CR_API_KEY:
         return False
 
     headers = {"Authorization": f"Bearer {CR_API_KEY}"}
@@ -128,10 +142,8 @@ async def sync_matches_for_user(db: Session, user: models.User, registered_tags:
     url = f"{API_BASE}/players/{clean_tag}/battlelog"
     
     try:
-        # 1. Added timeout to prevent hanging threads
         response = await asyncio.to_thread(requests.get, url, headers=headers, timeout=10)
         
-        # 2. Respect 429 Rate Limits immediately
         if response.status_code == 429:
             print(f"⚠️ Rate Limit Hit for {user.username}. Skipping.")
             return False
@@ -141,7 +153,6 @@ async def sync_matches_for_user(db: Session, user: models.User, registered_tags:
         
         battles = response.json()
         
-        # [Keep your existing battle parsing logic here...]
         for b in battles:
             try:
                 p1_tag = b["team"][0]["tag"]
@@ -196,21 +207,18 @@ async def run_sync_cycle(db: Session):
     print(f"🔄 Starting Batch Sync for {len(users_with_tags)} users...")
     
     for user in users_with_tags:
-        # 3. Isolation: Ensure one user failure doesn't stop the whole loop
         try:
             await sync_matches_for_user(db, user, registered_tags)
         except Exception as e:
             print(f"Critical failure for user {user.player_tag}: {e}")
-            
-        # 4. Throttling: Sleep 0.5s between users to prevent API Bans
-        # This allows ~120 requests/minute, safe for most API tiers.
+        
+        # Throttling to respect API Limits
         await asyncio.sleep(0.5)
 
 @app.on_event("startup")
 async def start_periodic_sync():
     async def loop():
-        # Initial delay to let the server start up fully
-        await asyncio.sleep(5)
+        await asyncio.sleep(5) # Grace period
         while True:
             print("🔄 Starting Background Sync...")
             db = database.SessionLocal()
@@ -301,35 +309,31 @@ async def forgot_password(
     db: Session = Depends(get_db)
 ):
     user = db.query(models.User).filter(models.User.email == req.email).first()
-    # We always return success to prevent email enumeration
     if not user:
         return {"message": "If this email is registered, a reset link has been sent."}
     
     reset_token = create_reset_token(req.email)
     
-    # In production, change this to your actual domain
-    base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-    if "192.168" in base_url or "localhost" in base_url:
-        # Helper for local dev if env not set perfectly
-        pass 
-        
-    reset_link = f"{base_url}/reset-password?token={reset_token}"
+    # SECURITY: Use the environment variable, do not assume localhost
+    reset_link = f"{FRONTEND_URL}/reset-password?token={reset_token}"
     
     message = MessageSchema(
         subject="ClashFriends Password Reset",
         recipients=[req.email],
         body=f"""
         <p>Hello {user.username},</p>
-        <p>You requested a password reset. Click the link below to set a new password:</p>
+        <p>Click below to reset your password:</p>
         <p><a href="{reset_link}">Reset Password</a></p>
-        <p>This link expires in 15 minutes.</p>
-        <p>If you did not request this, please ignore this email.</p>
+        <p>Link expires in 15 minutes.</p>
         """,
         subtype=MessageType.html
     )
 
-    fm = FastMail(conf)
-    background_tasks.add_task(fm.send_message, message)
+    try:
+        fm = FastMail(conf)
+        background_tasks.add_task(fm.send_message, message)
+    except Exception as e:
+        print(f"Mail Error: {e}")
     
     return {"message": "If this email is registered, a reset link has been sent."}
 
@@ -352,38 +356,10 @@ def reset_password(req: schemas.PasswordResetConfirm, db: Session = Depends(get_
         
     user.hashed_password = get_password_hash(req.new_password)
     db.commit()
-    
     return {"message": "Password updated successfully"}
 
-# --- Sync Endpoint ---
+# --- Sync Endpoint (With Cooldown) ---
 
-@app.post("/sync/{player_tag}")
-async def manual_sync_battles(player_tag: str, db: Session = Depends(get_db)):
-    formatted_tag = player_tag.upper()
-    if not formatted_tag.startswith("#"):
-        formatted_tag = f"#{formatted_tag}"
-        
-    user = db.query(models.User).filter(models.User.player_tag == formatted_tag).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-        
-    # Also refresh profile data (trophies/clan) during sync
-    cr_data = fetch_cr_player(formatted_tag)
-    if cr_data:
-        user.username = cr_data.get("name", user.username)
-        user.trophies = cr_data.get("trophies", user.trophies)
-        user.clan_name = cr_data.get("clan", {}).get("name")
-        db.commit()
-
-    all_users = db.query(models.User).filter(models.User.player_tag.isnot(None)).all()
-    registered_tags = {u.player_tag for u in all_users}
-    
-    await sync_matches_for_user(db, user, registered_tags)
-    return {"status": "success"}
-
-# --- Sync Endpoint (Refactored for Safety) ---
-
-# Simple in-memory cooldown tracker (resets on container restart)
 manual_sync_cooldowns = {}
 
 @app.post("/sync/{player_tag}")
@@ -392,7 +368,6 @@ async def manual_sync_battles(player_tag: str, db: Session = Depends(get_db)):
     if not formatted_tag.startswith("#"):
         formatted_tag = f"#{formatted_tag}"
         
-    # 5. Manual Sync Cooldown (2 minutes)
     last_sync = manual_sync_cooldowns.get(formatted_tag)
     if last_sync and datetime.now() - last_sync < timedelta(minutes=2):
         raise HTTPException(status_code=429, detail="Please wait 2 minutes before syncing again.")
@@ -401,10 +376,8 @@ async def manual_sync_battles(player_tag: str, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
         
-    # Update cooldown
     manual_sync_cooldowns[formatted_tag] = datetime.now()
         
-    # Refresh profile data
     cr_data = fetch_cr_player(formatted_tag)
     if cr_data:
         user.username = cr_data.get("name", user.username)
@@ -418,19 +391,16 @@ async def manual_sync_battles(player_tag: str, db: Session = Depends(get_db)):
     await sync_matches_for_user(db, user, registered_tags)
     return {"status": "success"}
 
-# --- Invite & Search Endpoints ---
+# --- Invites & Search Endpoints ---
 
 @app.get("/invites/{tag_or_token}", response_model=schemas.InviteResponse)
 def get_invite_details(tag_or_token: str, db: Session = Depends(get_db)):
-    # Prioritize strict Token lookup
     invite = db.query(models.Invite).filter(models.Invite.token == tag_or_token).first()
     
     if not invite:
-        # Fallback for legacy behavior
         formatted = tag_or_token.upper()
         if not formatted.startswith("#"): 
             formatted = f"#{formatted}"
-        
         invite = db.query(models.Invite).filter(models.Invite.target_tag == formatted).first()
     
     if not invite:
@@ -449,38 +419,19 @@ def create_invite(
     db: Session = Depends(get_db)
 ):
     import secrets
-    
     target_tag = None
     if req.target_tag:
         target_tag = req.target_tag.upper()
-        if not target_tag.startswith("#"):
-            target_tag = f"#{target_tag}"
-            
-        existing = db.query(models.Invite).filter_by(
-            creator_id=current_user.id, 
-            target_tag=target_tag
-        ).first()
+        if not target_tag.startswith("#"): target_tag = f"#{target_tag}"
+        existing = db.query(models.Invite).filter_by(creator_id=current_user.id, target_tag=target_tag).first()
         if existing:
-             return {
-                "token": existing.token,
-                "target_tag": existing.target_tag,
-                "creator_username": current_user.username
-            }
+             return {"token": existing.token, "target_tag": existing.target_tag, "creator_username": current_user.username}
     
     token = secrets.token_urlsafe(8)
-    invite = models.Invite(
-        token=token, 
-        creator_id=current_user.id,
-        target_tag=target_tag,
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=24)
-    )
+    invite = models.Invite(token=token, creator_id=current_user.id, target_tag=target_tag)
     db.add(invite)
     db.commit()
-    return {
-        "token": token, 
-        "target_tag": target_tag,
-        "creator_username": current_user.username
-    }
+    return {"token": token, "target_tag": target_tag, "creator_username": current_user.username}
 
 @app.get("/search/player")
 def search_player(
@@ -503,12 +454,7 @@ def search_player(
 
     cr_data = fetch_cr_player(tag)
     if cr_data:
-        return {
-            "status": "api_found",
-            "tag": tag,
-            "name": cr_data.get("name"),
-            "can_invite": True
-        }
+        return {"status": "api_found", "tag": tag, "name": cr_data.get("name"), "can_invite": True}
 
     return {"status": "not_found", "can_invite": False}
 
@@ -519,8 +465,7 @@ def link_player_tag(
     db: Session = Depends(get_db)
 ):
     formatted_tag = req.player_tag.upper()
-    if not formatted_tag.startswith("#"):
-        formatted_tag = f"#{formatted_tag}"
+    if not formatted_tag.startswith("#"): formatted_tag = f"#{formatted_tag}"
         
     existing = db.query(models.User).filter(models.User.player_tag == formatted_tag).first()
     if existing and existing.id != current_user.id:
@@ -532,7 +477,6 @@ def link_player_tag(
 
     current_user.player_tag = formatted_tag
     current_user.username = cr_data.get("name", current_user.username)
-    # Save profile data
     current_user.trophies = cr_data.get("trophies", 0)
     current_user.clan_name = cr_data.get("clan", {}).get("name")
     
@@ -545,17 +489,10 @@ def read_users_me(current_user: models.User = Depends(get_current_user)):
     return current_user
 
 @app.get("/matches", response_model=List[schemas.MatchResponse])
-def get_my_matches(
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    if not current_user.player_tag:
-        return []
+def get_my_matches(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user.player_tag: return []
     return db.query(models.Match).filter(
-        or_(
-            models.Match.player_1_tag == current_user.player_tag,
-            models.Match.player_2_tag == current_user.player_tag
-        )
+        or_(models.Match.player_1_tag == current_user.player_tag, models.Match.player_2_tag == current_user.player_tag)
     ).order_by(models.Match.battle_time.desc()).limit(50).all()
 
 @app.post("/friends/add")
@@ -566,10 +503,8 @@ def add_friend_internal(
 ):
     target_id = payload.get("user_id_2")
     uid1, uid2 = sorted([current_user.id, target_id])
-    
     if db.query(models.Friendship).filter_by(user_id_1=uid1, user_id_2=uid2).first():
         return {"status": "already_friends"}
-        
     new_friendship = models.Friendship(user_id_1=uid1, user_id_2=uid2)
     db.add(new_friendship)
     db.commit()
@@ -577,16 +512,7 @@ def add_friend_internal(
 
 @app.get("/users/{user_id}/friends")
 def get_friends_list(user_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if user_id != current_user.id:
-         raise HTTPException(status_code=403, detail="Not authorized")
-    
-    fs = db.query(models.Friendship).filter(
-        or_(models.Friendship.user_id_1 == user_id, models.Friendship.user_id_2 == user_id)
-    ).all()
-    
-    friend_ids = []
-    for f in fs:
-        friend_ids.append(f.user_id_2 if f.user_id_1 == user_id else f.user_id_1)
-        
-    friends = db.query(models.User).filter(models.User.id.in_(friend_ids)).all()
-    return friends
+    if user_id != current_user.id: raise HTTPException(status_code=403, detail="Not authorized")
+    fs = db.query(models.Friendship).filter(or_(models.Friendship.user_id_1 == user_id, models.Friendship.user_id_2 == user_id)).all()
+    friend_ids = [f.user_id_2 if f.user_id_1 == user_id else f.user_id_1 for f in fs]
+    return db.query(models.User).filter(models.User.id.in_(friend_ids)).all()

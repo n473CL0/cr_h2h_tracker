@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-// CHANGE: Use Environment Variable with local fallback
+// SECURITY FIX: Do not hardcode IPs. Use Environment Variables.
+// On Railway, this will read the HTTPS URL. Locally, it defaults to localhost.
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 const client = axios.create({
@@ -20,7 +21,6 @@ export const api = {
   },
 
   login: async (email, password) => {
-    // Backend expects 'username' field in FormData to carry the email
     const formData = new FormData();
     formData.append('username', email);
     formData.append('password', password);
@@ -43,10 +43,13 @@ export const api = {
     );
     return response.data;
   },
-
+  
+  // Helper for signup flow tag linking
   linkPlayerTag: async (playerTag) => {
-      const token = JSON.parse(localStorage.getItem('clash_user'))?.access_token;
-      if (!token) throw new Error("No token found");
+      const tokenStr = localStorage.getItem('clash_user');
+      if (!tokenStr) throw new Error("No session found");
+      
+      const token = JSON.parse(tokenStr).access_token;
       const response = await client.put('/users/link-tag', 
         { player_tag: playerTag },
         { headers: getAuthHeader(token) }
@@ -54,7 +57,6 @@ export const api = {
       return response.data;
   },
 
-  // Invite Logic
   getInvite: async (token) => {
     const response = await client.get(`/invites/${token}`);
     return response.data;
@@ -68,7 +70,6 @@ export const api = {
     return response.data;
   },
 
-  // Unified Search
   searchPlayer: async (query, token) => {
     const response = await client.get(`/search/player?query=${encodeURIComponent(query)}`, {
         headers: getAuthHeader(token)
@@ -103,7 +104,7 @@ export const api = {
     });
     return response.data;
   },
-  
+
   forgotPassword: async (email) => {
       const response = await client.post('/auth/forgot-password', { email });
       return response.data;
