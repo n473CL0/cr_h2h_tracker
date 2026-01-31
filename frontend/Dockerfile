@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Use 'npm ci' for a clean, deterministic install
-RUN npm ci
+RUN run build
 
 # Copy the rest of the source code
 COPY . .
