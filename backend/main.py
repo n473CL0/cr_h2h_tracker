@@ -24,7 +24,7 @@ import database
 def get_env(key, default=None):
     val = os.getenv(key, default)
     if not val and default is None:
-        print(f"⚠️  Warning: {key} is missing in environment variables.")g
+        print(f"⚠️  Warning: {key} is missing in environment variables.")
 
 SECRET_KEY = get_env("SECRET_KEY", "dev_unsafe_secret")
 CR_API_KEY = get_env("CR_API_KEY") 
