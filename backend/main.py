@@ -34,7 +34,7 @@ def get_env(key, default=None):
 SECRET_KEY = get_env("SECRET_KEY", "dev_unsafe_secret")
 CR_API_KEY = get_env("CR_API_KEY") 
 FRONTEND_URL = get_env("FRONTEND_URL", "http://localhost:3000")
-API_BASE = "https://proxy.royaleapi.dev"
+API_BASE = "https://proxy.royaleapi.dev/v1"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
