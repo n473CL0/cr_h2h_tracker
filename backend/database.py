@@ -1,43 +1,16 @@
 import os
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-<<<<<<< HEAD
-# SECURITY: The app will now fail if DATABASE_URL is not provided (e.g. via Railway).
-# We do not fallback to a hardcoded string anymore.
-DATABASE_URL = os.getenv("DATABASE_URL")
+# RAILWAY CONFIGURATION
+# 1. Tries to get the secure DATABASE_URL from Railway environment variables.
+# 2. Fallback to local Docker connection string only if env var is missing.
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@db:5432/cr_tracker")
 
-if not DATABASE_URL:
-    # Optional: fallback ONLY for local Docker if needed, but safer to rely on .env
-    # We allow this specific string because it matches the docker-compose default
-    DATABASE_URL = "postgresql://user:password@db:5432/cr_tracker"
+# Ensure we use the correct driver prefix for SQLAlchemy (postgres:// -> postgresql://)
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
-=======
-# 1. Load Database URL from environment
-# We default to the docker service name 'db' if not found
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
-    "postgresql://user:password@db:5432/cr_tracker"
-)
-
-# 2. Configure the Engine
-engine = create_engine(DATABASE_URL)
-
-# 3. Create SessionLocal class for DB requests
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# 4. Base class for our models
-Base = declarative_base()
-
-# 5. Dependency for FastAPI endpoints
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
->>>>>>> parent of c7749a0 (backend restructuring)
