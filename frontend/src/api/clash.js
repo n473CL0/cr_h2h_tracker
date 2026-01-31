@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const API_URL = 'http://192.168.0.50:8000';
+// CHANGE: Use Environment Variable with local fallback
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 const client = axios.create({
   baseURL: API_URL,
@@ -41,6 +42,16 @@ export const api = {
       { headers: getAuthHeader(token) }
     );
     return response.data;
+  },
+
+  linkPlayerTag: async (playerTag) => {
+      const token = JSON.parse(localStorage.getItem('clash_user'))?.access_token;
+      if (!token) throw new Error("No token found");
+      const response = await client.put('/users/link-tag', 
+        { player_tag: playerTag },
+        { headers: getAuthHeader(token) }
+      );
+      return response.data;
   },
 
   // Invite Logic
@@ -91,5 +102,15 @@ export const api = {
       headers: getAuthHeader(token)
     });
     return response.data;
+  },
+  
+  forgotPassword: async (email) => {
+      const response = await client.post('/auth/forgot-password', { email });
+      return response.data;
+  },
+
+  resetPassword: async (token, newPassword) => {
+      const response = await client.post('/auth/reset-password', { token, new_password: newPassword });
+      return response.data;
   }
 };

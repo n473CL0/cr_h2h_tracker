@@ -39,14 +39,16 @@ conf = ConnectionConfig(
 models.Base.metadata.create_all(bind=database.engine)
 app = FastAPI(title="ClashFriends API")
 
+# Fetch the allowed origin from environment variables
+ORIGINS = [os.getenv("FRONTEND_URL", "http://localhost:3000")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ORIGINS, # Restrict to your frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
@@ -115,20 +117,31 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
 # --- Core Sync Logic ---
 
 async def sync_matches_for_user(db: Session, user: models.User, registered_tags: set):
+    """
+    Returns True if sync succeeded, False if failed.
+    """
     if not user.player_tag:
-        return
+        return False
 
     headers = {"Authorization": f"Bearer {CR_API_KEY}"}
     clean_tag = user.player_tag.replace("#", "%23")
     url = f"{API_BASE}/players/{clean_tag}/battlelog"
     
     try:
-        response = await asyncio.to_thread(requests.get, url, headers=headers)
+        # 1. Added timeout to prevent hanging threads
+        response = await asyncio.to_thread(requests.get, url, headers=headers, timeout=10)
+        
+        # 2. Respect 429 Rate Limits immediately
+        if response.status_code == 429:
+            print(f"⚠️ Rate Limit Hit for {user.username}. Skipping.")
+            return False
+
         if response.status_code != 200:
-            return
+            return False
         
         battles = response.json()
         
+        # [Keep your existing battle parsing logic here...]
         for b in battles:
             try:
                 p1_tag = b["team"][0]["tag"]
@@ -163,13 +176,16 @@ async def sync_matches_for_user(db: Session, user: models.User, registered_tags:
                     crowns_2=crowns_2
                 )
                 db.add(match_record)
-            except (KeyError, IndexError) as e:
+            except (KeyError, IndexError):
                 continue
         
         db.commit()
+        return True
             
     except Exception as e:
+        print(f"Error syncing {user.username}: {e}")
         db.rollback()
+        return False
 
 async def run_sync_cycle(db: Session):
     users_with_tags = db.query(models.User).filter(models.User.player_tag.isnot(None)).all()
@@ -177,20 +193,31 @@ async def run_sync_cycle(db: Session):
         return
         
     registered_tags = {u.player_tag for u in users_with_tags}
+    print(f"🔄 Starting Batch Sync for {len(users_with_tags)} users...")
     
     for user in users_with_tags:
-        await sync_matches_for_user(db, user, registered_tags)
+        # 3. Isolation: Ensure one user failure doesn't stop the whole loop
+        try:
+            await sync_matches_for_user(db, user, registered_tags)
+        except Exception as e:
+            print(f"Critical failure for user {user.player_tag}: {e}")
+            
+        # 4. Throttling: Sleep 0.5s between users to prevent API Bans
+        # This allows ~120 requests/minute, safe for most API tiers.
+        await asyncio.sleep(0.5)
 
 @app.on_event("startup")
 async def start_periodic_sync():
     async def loop():
+        # Initial delay to let the server start up fully
+        await asyncio.sleep(5)
         while True:
             print("🔄 Starting Background Sync...")
             db = database.SessionLocal()
             try:
                 await run_sync_cycle(db)
             except Exception as e:
-                print(f"Background Sync Failed: {e}")
+                print(f"Background Sync Fatal Error: {e}")
             finally:
                 db.close()
             print("✅ Sync Complete. Sleeping 30 mins.")
@@ -341,6 +368,43 @@ async def manual_sync_battles(player_tag: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
         
     # Also refresh profile data (trophies/clan) during sync
+    cr_data = fetch_cr_player(formatted_tag)
+    if cr_data:
+        user.username = cr_data.get("name", user.username)
+        user.trophies = cr_data.get("trophies", user.trophies)
+        user.clan_name = cr_data.get("clan", {}).get("name")
+        db.commit()
+
+    all_users = db.query(models.User).filter(models.User.player_tag.isnot(None)).all()
+    registered_tags = {u.player_tag for u in all_users}
+    
+    await sync_matches_for_user(db, user, registered_tags)
+    return {"status": "success"}
+
+# --- Sync Endpoint (Refactored for Safety) ---
+
+# Simple in-memory cooldown tracker (resets on container restart)
+manual_sync_cooldowns = {}
+
+@app.post("/sync/{player_tag}")
+async def manual_sync_battles(player_tag: str, db: Session = Depends(get_db)):
+    formatted_tag = player_tag.upper()
+    if not formatted_tag.startswith("#"):
+        formatted_tag = f"#{formatted_tag}"
+        
+    # 5. Manual Sync Cooldown (2 minutes)
+    last_sync = manual_sync_cooldowns.get(formatted_tag)
+    if last_sync and datetime.now() - last_sync < timedelta(minutes=2):
+        raise HTTPException(status_code=429, detail="Please wait 2 minutes before syncing again.")
+
+    user = db.query(models.User).filter(models.User.player_tag == formatted_tag).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    # Update cooldown
+    manual_sync_cooldowns[formatted_tag] = datetime.now()
+        
+    # Refresh profile data
     cr_data = fetch_cr_player(formatted_tag)
     if cr_data:
         user.username = cr_data.get("name", user.username)
