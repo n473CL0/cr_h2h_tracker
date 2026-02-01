@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { UserPlus, RefreshCw, LogOut } from 'lucide-react';
+import { UserPlus, RefreshCw } from 'lucide-react'; // Removed LogOut (handled by Layout)
 import StatCard from '../components/StatCard';
 import Leaderboard from '../components/Leaderboard';
 import PlayerProfileCard from '../components/PlayerProfileCard';
@@ -9,16 +9,16 @@ import FeedbackModal from '../components/FeedbackModal';
 import { api } from '../api/clash';
 
 const Dashboard = ({ user, token, onLogout }) => {
+  // ... Keep existing state definitions (matches, friends, etc.) ...
   const [matches, setMatches] = useState([]);
   const [friends, setFriends] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
-
-  // We need to refresh user data periodically or on sync to get updated trophies
   const [currentUser, setCurrentUser] = useState(user);
 
+  // ... Keep existing fetchData and useEffect ...
   const fetchData = useCallback(async () => {
     try {
       const [matchData, friendData, userData] = await Promise.all([
@@ -30,11 +30,7 @@ const Dashboard = ({ user, token, onLogout }) => {
       setFriends(friendData);
       setCurrentUser(userData);
     } catch (err) {
-      console.error("Fetch error:", err);
-      // ADD THIS: Logout if token is invalid
-      if (err.response && err.response.status === 401) {
-        onLogout();
-      }
+      if (err.response && err.response.status === 401) onLogout();
     } finally {
       setLoading(false);
     }
@@ -53,69 +49,61 @@ const Dashboard = ({ user, token, onLogout }) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100">
+    <div className="space-y-6">
+      {/* Moved BetaBanner here or keep in Layout if you prefer global */}
       <BetaBanner onOpenFeedback={() => setIsFeedbackOpen(true)} />
-      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex justify-between items-center">
-          <h1 className="font-black text-xl tracking-tight text-white">
-            CLASH<span className="text-blue-500">FRIENDS</span>
-          </h1>
-          <div className="flex items-center gap-3">
-            <button onClick={handleSync} disabled={syncing} className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-white">
-              <RefreshCw className={`w-5 h-5 ${syncing ? 'animate-spin' : ''}`} />
-            </button>
-            <button onClick={onLogout} className="p-2 hover:bg-red-900/20 text-slate-400 hover:text-red-500 rounded-lg transition-colors">
-              <LogOut className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-      </header>
 
-      <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      {/* --- CONTENT ONLY (Header Removed) --- */}
+      
+      {/* Mobile/Tablet: Sync Button & Title Row */}
+      <div className="flex items-center justify-between md:hidden">
+         <h2 className="text-2xl font-bold text-white">Dashboard</h2>
+         <button 
+            onClick={handleSync} 
+            disabled={syncing}
+            className="p-2 bg-slate-800 rounded-lg text-blue-400 hover:text-white transition-colors"
+         >
+            <RefreshCw className={`w-5 h-5 ${syncing ? 'animate-spin' : ''}`} />
+         </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        {/* Left Column */}
+        <div className="lg:col-span-2 space-y-6">
+          <PlayerProfileCard user={currentUser} />
           
-          {/* Left Column: Profile & Stats */}
-          <div className="lg:col-span-2 space-y-6">
-            
-            {/* NEW: Player Profile Card */}
-            <PlayerProfileCard user={currentUser} />
-
-            {/* <div className="bg-slate-800/50 rounded-2xl border border-slate-700 p-6">
-                <h2 className="text-xl font-bold text-white mb-4">Your Performance</h2>
-                {loading ? (
-                    <div className="h-24 flex items-center justify-center text-slate-500">Loading stats...</div>
-                ) : (
-                    <StatCard matches={matches} playerTag={user.player_tag} />
-                )}
-            </div> */}
-            
-            <div className="bg-blue-900/10 border border-blue-500/20 rounded-xl p-4 text-center">
-                <p className="text-blue-400 text-sm">
-                    Battle data is synced every 30 minutes. 
-                    <button onClick={handleSync} className="underline ml-1 hover:text-blue-300">Sync now</button>
-                </p>
-            </div>
-          </div>
-
-          {/* Right Column: Leaderboard & Actions */}
-          <div className="space-y-6">
-            <button 
-                onClick={() => setIsSearchOpen(true)} 
-                className="w-full py-4 bg-blue-600 hover:bg-blue-700 rounded-xl font-bold flex items-center justify-center gap-2 transition-all transform active:scale-95 shadow-lg shadow-blue-900/20 text-white"
-            >
-              <UserPlus className="w-5 h-5" /> Add Friend
-            </button>
-            
-            <Leaderboard matches={matches} friends={friends} playerTag={user.player_tag} />
+          <div className="bg-blue-900/10 border border-blue-500/20 rounded-xl p-4 flex items-center justify-between">
+              <p className="text-blue-400 text-sm">
+                  Battle data is synced automatically.
+              </p>
+              {/* Desktop Sync Button */}
+              <button 
+                onClick={handleSync} 
+                disabled={syncing}
+                className="hidden md:flex items-center gap-2 text-sm font-bold text-blue-400 hover:text-white transition-colors"
+              >
+                <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+                Sync Now
+              </button>
           </div>
         </div>
-      </main>
 
-      <FeedbackModal 
-        isOpen={isFeedbackOpen} 
-        onClose={() => setIsFeedbackOpen(false)} 
-      />
+        {/* Right Column */}
+        <div className="space-y-6">
+          <button 
+              onClick={() => setIsSearchOpen(true)} 
+              className="w-full py-4 bg-blue-600 hover:bg-blue-700 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20 text-white transition-all transform active:scale-95"
+          >
+            <UserPlus className="w-5 h-5" /> Add Friend
+          </button>
+          
+          <Leaderboard matches={matches} friends={friends} playerTag={user.player_tag} />
+        </div>
+      </div>
 
+      {/* ... Modals ... */}
+      <FeedbackModal isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
       <FriendSearchModal 
         isOpen={isSearchOpen} 
         onClose={() => setIsSearchOpen(false)} 
