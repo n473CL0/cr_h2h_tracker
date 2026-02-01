@@ -1,7 +1,6 @@
 import axios from 'axios';
 
 // SECURITY FIX: Do not hardcode IPs. Use Environment Variables.
-// On Railway, this will read the HTTPS URL. Locally, it defaults to localhost.
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 const client = axios.create({
@@ -11,10 +10,24 @@ const client = axios.create({
   },
 });
 
+// Helper 1: For components that pass the token explicitly (Legacy/Auth flow)
 const getAuthHeader = (token) => ({ Authorization: `Bearer ${token}` });
 
+// Helper 2: For components that expect the token to be in localStorage (New Social features)
+const getAuthHeaders = () => {
+  const tokenStr = localStorage.getItem('clash_user');
+  if (!tokenStr) return {};
+  try {
+    const token = JSON.parse(tokenStr).access_token;
+    return { Authorization: `Bearer ${token}` };
+  } catch (e) {
+    console.error("Error parsing token", e);
+    return {};
+  }
+};
+
 export const api = {
-  // userData: { email, password, invite_token, player_tag }
+  // --- Auth & User Management ---
   signup: async (userData) => {
     const response = await client.post('/auth/signup', userData);
     return response.data;
@@ -44,65 +57,12 @@ export const api = {
     return response.data;
   },
   
-  // Helper for signup flow tag linking
   linkPlayerTag: async (playerTag) => {
-      const tokenStr = localStorage.getItem('clash_user');
-      if (!tokenStr) throw new Error("No session found");
-      
-      const token = JSON.parse(tokenStr).access_token;
       const response = await client.put('/users/link-tag', 
         { player_tag: playerTag },
-        { headers: getAuthHeader(token) }
+        { headers: getAuthHeaders() } // Uses localStorage
       );
       return response.data;
-  },
-
-  getInvite: async (token) => {
-    const response = await client.get(`/invites/${token}`);
-    return response.data;
-  },
-
-  createInvite: async (targetTag, token) => {
-    const response = await client.post('/invites/', 
-      { target_tag: targetTag }, 
-      { headers: getAuthHeader(token) }
-    );
-    return response.data;
-  },
-
-  searchPlayer: async (query, token) => {
-    const response = await client.get(`/search/player?query=${encodeURIComponent(query)}`, {
-        headers: getAuthHeader(token)
-    });
-    return response.data;
-  },
-
-  addFriend: async (currentUserId, friendId, token) => {
-    const response = await client.post('/friends/add', 
-      { user_id_1: currentUserId, user_id_2: friendId },
-      { headers: getAuthHeader(token) }
-    );
-    return response.data;
-  },
-
-  getMatches: async (playerTag, token) => {
-    const response = await client.get(`/matches`, { headers: getAuthHeader(token) });
-    return response.data;
-  },
-
-  syncBattles: async (playerTag, token) => {
-    const cleanTag = playerTag.replace('#', '');
-    const response = await client.post(`/sync/${cleanTag}`, {}, {
-      headers: getAuthHeader(token)
-    });
-    return response.data;
-  },
-
-  getFriends: async (userId, token) => {
-    const response = await client.get(`/users/${userId}/friends`, {
-      headers: getAuthHeader(token)
-    });
-    return response.data;
   },
 
   forgotPassword: async (email) => {
@@ -115,69 +75,106 @@ export const api = {
       return response.data;
   },
 
+  // --- Social Features (Updated to use axios + getAuthHeaders) ---
+
+  getInvite: async (token) => {
+    // If token passed explicitly, use it, otherwise fallback to storage
+    const headers = token ? getAuthHeader(token) : getAuthHeaders();
+    const response = await client.get(`/invites/${token}`, { headers });
+    return response.data;
+  },
+
+  createInvite: async (targetTag, token) => {
+    const headers = token ? getAuthHeader(token) : getAuthHeaders();
+    const response = await client.post('/invites/', 
+      { target_tag: targetTag }, 
+      { headers }
+    );
+    return response.data;
+  },
+
+  searchPlayer: async (query, token) => {
+    const headers = token ? getAuthHeader(token) : getAuthHeaders();
+    const response = await client.get(`/search/player?query=${encodeURIComponent(query)}`, { headers });
+    return response.data;
+  },
+
+  // Note: This endpoint was duplicated in your previous file. Standardized here.
+  addFriend: async (targetId) => {
+    // Payload matches backend expectation (user_id_2)
+    const response = await client.post('/friends/add', 
+      { user_id_2: targetId },
+      { headers: getAuthHeaders() }
+    );
+    return response.data;
+  },
+
+  getFriends: async (userId, token) => {
+    const headers = token ? getAuthHeader(token) : getAuthHeaders();
+    const response = await client.get(`/users/${userId}/friends`, { headers });
+    return response.data;
+  },
+
+  getMatches: async (playerTag, token) => {
+    const headers = token ? getAuthHeader(token) : getAuthHeaders();
+    const response = await client.get(`/matches`, { headers });
+    return response.data;
+  },
+
+  syncBattles: async (playerTag, token) => {
+    const cleanTag = playerTag.replace('#', '');
+    const headers = token ? getAuthHeader(token) : getAuthHeaders();
+    const response = await client.post(`/sync/${cleanTag}`, {}, { headers });
+    return response.data;
+  },
+
   submitFeedback: async (data, token) => {
-    const response = await client.post('/feedback', data, {
-      headers: getAuthHeader(token)
+    const headers = token ? getAuthHeader(token) : getAuthHeaders();
+    const response = await client.post('/feedback', data, { headers });
+    return response.data;
+  },
+
+  // --- New Step 3 Features ---
+
+  getFeed: async (skip = 0, limit = 10) => {
+    const response = await client.get(`/feed?skip=${skip}&limit=${limit}`, {
+      headers: getAuthHeaders(),
     });
     return response.data;
   },
 
-  getFeed: async (skip = 0, limit = 10) => {
-    const response = await fetch(`${API_URL}/feed?skip=${skip}&limit=${limit}`, {
-      headers: getAuthHeaders(),
-    });
-    if (!response.ok) throw new Error('Failed to fetch feed');
-    return response.json();
-  },
-
   getUser: async (userId) => {
-    const response = await fetch(`${API_URL}/users/${userId}`, {
+    const response = await client.get(`/users/${userId}`, {
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to fetch user');
-    return response.json();
+    return response.data;
   },
 
   getUserMatches: async (userId, skip = 0, limit = 10) => {
-    const response = await fetch(`${API_URL}/users/${userId}/matches?skip=${skip}&limit=${limit}`, {
+    const response = await client.get(`/users/${userId}/matches?skip=${skip}&limit=${limit}`, {
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to fetch matches');
-    return response.json();
-  },
-
-  addFriend: async (friendId) => {
-    const response = await fetch(`${API_URL}/friends/${friendId}`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
-    if (!response.ok) throw new Error('Failed to add friend');
-    return response.json();
+    return response.data;
   },
 
   completeOnboarding: async () => {
-    const response = await fetch(`${API_URL}/users/onboarding`, {
-      method: 'POST',
+    const response = await client.post('/users/onboarding', {}, {
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to update onboarding status');
-    return response.json();
+    return response.data;
   },
 
   getAdvancedLeaderboard: async () => {
-    // Expected return: { nemesis: [], rivals: [], domination: [] }
-    const response = await fetch(`${API_URL}/stats/leaderboard`, {
+    const response = await client.get('/stats/leaderboard', {
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to fetch leaderboard');
-    return response.json();
+    return response.data;
   },
 
   getH2HStats: async (friendId) => {
-    const response = await fetch(`${API_URL}/stats/h2h/${friendId}`, {
+    const response = await client.get(`/stats/h2h/${friendId}`, {
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to fetch H2H stats');
-    return response.json();
+    return response.data;
   }
 };
