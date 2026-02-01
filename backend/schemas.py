@@ -20,6 +20,13 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     email: Optional[str] = None
 
+# --- User Creation (Internal/CRUD) ---
+class UserCreate(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
+    player_tag: Optional[str] = None
+
 # --- Password Reset ---
 class PasswordResetRequest(BaseModel):
     email: EmailStr
