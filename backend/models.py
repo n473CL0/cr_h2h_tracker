@@ -41,9 +41,6 @@ class Match(Base):
     id = Column(Integer, primary_key=True, index=True)
     battle_id = Column(String(50), unique=True, index=True)
     
-    # REFACTOR: Removed ForeignKey constraints here.
-    # We store the raw player tags so we can track matches against random opponents
-    # who are not registered in our 'users' table.
     player_1_tag = Column(String(15), index=True)
     player_2_tag = Column(String(15), index=True)
     
