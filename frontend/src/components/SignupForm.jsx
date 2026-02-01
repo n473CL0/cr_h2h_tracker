@@ -29,7 +29,8 @@ const SignupForm = ({ onSignupSuccess, onSwitchToLogin }) => {
       await api.signup({
         username: formData.username,
         password: formData.password,
-        invite_token: formData.invite_token
+        invite_token: formData.invite_token,
+        player_tag: formattedTag
       });
       
       // 2. Auto-Login to get JWT
