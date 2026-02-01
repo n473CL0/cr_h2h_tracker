@@ -15,10 +15,11 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
 
-# Import local modules (ensure models.py and schemas.py exist)
+# Import local modules
 import models
 import schemas
 import database
+import crud
 
 # --- Configuration ---
 def get_env(key, default=None):
@@ -146,6 +147,8 @@ async def sync_user_matches(db: Session, user: models.User, known_tags: set):
             return
 
         battles = resp.json()
+        matches_to_add = []
+        
         for b in battles:
             try:
                 # Basic parsing
@@ -159,31 +162,30 @@ async def sync_user_matches(db: Session, user: models.User, known_tags: set):
                 b_time_str = b["battleTime"]
                 bid = generate_battle_id(b_time_str, p1_tag, p2_tag)
                 
-                if db.query(models.Match).filter_by(battle_id=bid).first():
-                    continue
-                
                 # Determine winner
                 c1 = b["team"][0]["crowns"]
                 c2 = b["opponent"][0]["crowns"]
                 winner = p1_tag if c1 > c2 else (p2_tag if c2 > c1 else None)
                 
-                match_obj = models.Match(
-                    battle_id=bid,
-                    player_1_tag=p1_tag,
-                    player_2_tag=p2_tag,
-                    winner_tag=winner,
-                    battle_time=datetime.strptime(b_time_str, "%Y%m%dT%H%M%S.%fZ").replace(tzinfo=timezone.utc),
-                    game_mode=b.get("type", "Ladder"),
-                    crowns_1=c1,
-                    crowns_2=c2
-                )
-                db.add(match_obj)
+                matches_to_add.append({
+                    "battle_id": bid,
+                    "player_1_tag": p1_tag,
+                    "player_2_tag": p2_tag,
+                    "winner_tag": winner,
+                    "battle_time": datetime.strptime(b_time_str, "%Y%m%dT%H%M%S.%fZ").replace(tzinfo=timezone.utc),
+                    "game_mode": b.get("type", "Ladder"),
+                    "crowns_1": c1,
+                    "crowns_2": c2
+                })
             except Exception:
                 continue # Skip bad records
-        db.commit()
+        
+        # Use bulk upsert logic
+        if matches_to_add:
+            crud.upsert_matches(db, matches_to_add)
+            
     except Exception as e:
         print(f"Sync error for {user.username}: {e}")
-        db.rollback()
 
 async def background_sync_task():
     await asyncio.sleep(5) # Startup buffer
@@ -307,13 +309,37 @@ def reset_password(req: schemas.PasswordResetConfirm, db: Session = Depends(get_
 def get_me(current: models.User = Depends(get_current_user)):
     return current
 
+@app.get("/users/{user_id}", response_model=schemas.UserResponse)
+def get_public_profile(user_id: int, current: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
 @app.get("/matches", response_model=List[schemas.MatchResponse])
 def get_matches(current: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not current.player_tag: return []
-    return db.query(models.Match).filter(
-        or_(models.Match.player_1_tag == current.player_tag, 
-            models.Match.player_2_tag == current.player_tag)
-    ).order_by(models.Match.battle_time.desc()).limit(50).all()
+    return crud.get_matches_for_player(db, current.player_tag)
+
+@app.get("/users/{user_id}/matches", response_model=List[schemas.MatchResponse])
+def get_user_matches(user_id: int, current: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not user.player_tag:
+        return []
+    return crud.get_matches_for_player(db, user.player_tag)
+
+@app.get("/feed", response_model=List[schemas.MatchResponse])
+def get_social_feed(current: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return crud.get_social_feed(db, current)
+
+@app.post("/users/onboarding", response_model=schemas.UserResponse)
+def complete_onboarding(current: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    current.onboarding_completed = True
+    db.commit()
+    db.refresh(current)
+    return current
 
 # Manual Sync Rate Limit
 sync_cooldowns = {}

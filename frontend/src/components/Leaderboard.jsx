@@ -3,7 +3,10 @@ import { Trophy, Swords, User } from 'lucide-react';
 
 const Leaderboard = ({ matches, friends, playerTag }) => {
   // Helper to normalize tags for reliable comparison
-  const normalize = (tag) => tag.toUpperCase().trim().startsWith('#') ? tag.toUpperCase().trim() : `#${tag.toUpperCase().trim()}`;
+  const normalize = (tag) => {
+    if (!tag) return "UNKNOWN";
+    return tag.toUpperCase().trim().startsWith('#') ? tag.toUpperCase().trim() : `#${tag.toUpperCase().trim()}`;
+  }; 
   
   const myNormalizedTag = normalize(playerTag);
 

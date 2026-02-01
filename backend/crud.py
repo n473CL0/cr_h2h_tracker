@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, desc
+from sqlalchemy import or_, and_, desc
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 import models, schemas
 
@@ -32,6 +32,38 @@ def get_matches_for_player(db: Session, player_tag: str, limit: int = 50):
         )
     ).order_by(desc(models.Match.battle_time)).limit(limit).all()
 
+def get_social_feed(db: Session, current_user: models.User, limit: int = 50):
+    """
+    Returns matches where BOTH participants are in the user's circle (self + friends).
+    """
+    # 1. Get friend IDs
+    friendships = db.query(models.Friendship).filter(
+        or_(models.Friendship.user_id_1 == current_user.id, 
+            models.Friendship.user_id_2 == current_user.id)
+    ).all()
+    
+    friend_ids = []
+    for f in friendships:
+        friend_ids.append(f.user_id_2 if f.user_id_1 == current_user.id else f.user_id_1)
+        
+    # 2. Get tags (Self + Friends)
+    # We always include the current user to see matches they played against friends
+    target_ids = friend_ids + [current_user.id]
+    
+    users_in_circle = db.query(models.User).filter(models.User.id.in_(target_ids)).all()
+    circle_tags = {u.player_tag for u in users_in_circle if u.player_tag}
+    
+    if len(circle_tags) < 2:
+        return []
+
+    # 3. Query matches where both P1 and P2 are in the circle
+    return db.query(models.Match).filter(
+        and_(
+            models.Match.player_1_tag.in_(circle_tags),
+            models.Match.player_2_tag.in_(circle_tags)
+        )
+    ).order_by(desc(models.Match.battle_time)).limit(limit).all()
+
 def upsert_matches(db: Session, matches_data: list[dict]):
     """
     Bulk insert matches. Ignores duplicates based on the 'battle_id' 
@@ -49,5 +81,3 @@ def upsert_matches(db: Session, matches_data: list[dict]):
     
     db.execute(do_nothing_stmt)
     db.commit()
-
-    

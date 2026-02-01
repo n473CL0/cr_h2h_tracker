@@ -36,6 +36,7 @@ class UserResponse(BaseModel):
     player_tag: Optional[str] = None
     trophies: int = 0
     clan_name: Optional[str] = None
+    onboarding_completed: bool = False
     
     class Config:
         from_attributes = True
