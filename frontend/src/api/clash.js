@@ -1,6 +1,5 @@
 import axios from 'axios';
 
-// SECURITY FIX: Do not hardcode IPs. Use Environment Variables.
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 const client = axios.create({
@@ -13,17 +12,11 @@ const client = axios.create({
 // Helper 1: For components that pass the token explicitly (Legacy/Auth flow)
 const getAuthHeader = (token) => ({ Authorization: `Bearer ${token}` });
 
-// Helper 2: For components that expect the token to be in localStorage (New Social features)
+// Helper 2: CORRECTION - Read 'clash_token' as a raw string
 const getAuthHeaders = () => {
-  const tokenStr = localStorage.getItem('clash_user');
-  if (!tokenStr) return {};
-  try {
-    const token = JSON.parse(tokenStr).access_token;
-    return { Authorization: `Bearer ${token}` };
-  } catch (e) {
-    console.error("Error parsing token", e);
-    return {};
-  }
+  const token = localStorage.getItem('clash_token'); // Matches App.js key
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };       // Uses token directly
 };
 
 export const api = {
@@ -60,7 +53,7 @@ export const api = {
   linkPlayerTag: async (playerTag) => {
       const response = await client.put('/users/link-tag', 
         { player_tag: playerTag },
-        { headers: getAuthHeaders() } // Uses localStorage
+        { headers: getAuthHeaders() } 
       );
       return response.data;
   },
@@ -75,10 +68,9 @@ export const api = {
       return response.data;
   },
 
-  // --- Social Features (Updated to use axios + getAuthHeaders) ---
+  // --- Social Features ---
 
   getInvite: async (token) => {
-    // If token passed explicitly, use it, otherwise fallback to storage
     const headers = token ? getAuthHeader(token) : getAuthHeaders();
     const response = await client.get(`/invites/${token}`, { headers });
     return response.data;
@@ -99,9 +91,7 @@ export const api = {
     return response.data;
   },
 
-  // Note: This endpoint was duplicated in your previous file. Standardized here.
   addFriend: async (targetId) => {
-    // Payload matches backend expectation (user_id_2)
     const response = await client.post('/friends/add', 
       { user_id_2: targetId },
       { headers: getAuthHeaders() }
@@ -134,7 +124,7 @@ export const api = {
     return response.data;
   },
 
-  // --- New Step 3 Features ---
+  // --- Step 3 Features ---
 
   getFeed: async (skip = 0, limit = 10) => {
     const response = await client.get(`/feed?skip=${skip}&limit=${limit}`, {
