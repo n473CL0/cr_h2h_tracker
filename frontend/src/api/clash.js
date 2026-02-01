@@ -114,11 +114,70 @@ export const api = {
       const response = await client.post('/auth/reset-password', { token, new_password: newPassword });
       return response.data;
   },
-  
+
   submitFeedback: async (data, token) => {
     const response = await client.post('/feedback', data, {
       headers: getAuthHeader(token)
     });
     return response.data;
   },
+
+  getFeed: async (skip = 0, limit = 10) => {
+    const response = await fetch(`${API_URL}/feed?skip=${skip}&limit=${limit}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch feed');
+    return response.json();
+  },
+
+  getUser: async (userId) => {
+    const response = await fetch(`${API_URL}/users/${userId}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch user');
+    return response.json();
+  },
+
+  getUserMatches: async (userId, skip = 0, limit = 10) => {
+    const response = await fetch(`${API_URL}/users/${userId}/matches?skip=${skip}&limit=${limit}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch matches');
+    return response.json();
+  },
+
+  addFriend: async (friendId) => {
+    const response = await fetch(`${API_URL}/friends/${friendId}`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to add friend');
+    return response.json();
+  },
+
+  completeOnboarding: async () => {
+    const response = await fetch(`${API_URL}/users/onboarding`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to update onboarding status');
+    return response.json();
+  },
+
+  getAdvancedLeaderboard: async () => {
+    // Expected return: { nemesis: [], rivals: [], domination: [] }
+    const response = await fetch(`${API_URL}/stats/leaderboard`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch leaderboard');
+    return response.json();
+  },
+
+  getH2HStats: async (friendId) => {
+    const response = await fetch(`${API_URL}/stats/h2h/${friendId}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error('Failed to fetch H2H stats');
+    return response.json();
+  }
 };

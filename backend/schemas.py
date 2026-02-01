@@ -38,6 +38,9 @@ class UserResponse(BaseModel):
     clan_name: Optional[str] = None
     onboarding_completed: bool = False
     
+    # NEW: Social Context
+    friendship_status: Optional[str] = "none" # 'self', 'friend', 'pending', 'none'
+    
     class Config:
         from_attributes = True
 
@@ -66,6 +69,27 @@ class MatchResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# --- New Stats Schemas ---
+class LeaderboardEntry(BaseModel):
+    username: str
+    player_tag: str
+    win_rate: float
+    total_matches: int
+
+class LeaderboardResponse(BaseModel):
+    domination: List[LeaderboardEntry] # > 60%
+    rivals: List[LeaderboardEntry]     # 40-60% or 0 matches
+    nemesis: List[LeaderboardEntry]    # < 40%
+
+class H2HStatsResponse(BaseModel):
+    friend_username: str
+    total_matches: int
+    win_rate: float
+    total_crowns_user: int
+    total_crowns_friend: int
+    streak: str  # e.g., "3 Wins", "1 Loss"
+    last_5_results: List[str] # ["W", "L", "W", "D", "L"]
 
 # --- Feedback ---
 class FeedbackCreate(BaseModel):

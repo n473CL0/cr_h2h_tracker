@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from fastapi import FastAPI, Depends, HTTPException, status, Body, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, status, Body, BackgroundTasks, Query
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -307,6 +307,7 @@ def reset_password(req: schemas.PasswordResetConfirm, db: Session = Depends(get_
 # --- Routes: Core ---
 @app.get("/users/me", response_model=schemas.UserResponse)
 def get_me(current: models.User = Depends(get_current_user)):
+    current.friendship_status = "self"
     return current
 
 @app.get("/users/{user_id}", response_model=schemas.UserResponse)
@@ -314,31 +315,60 @@ def get_public_profile(user_id: int, current: models.User = Depends(get_current_
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+        
+    if user.id == current.id:
+        status_val = "self"
+    elif crud.get_friendship(db, current.id, user.id):
+        status_val = "friend"
+    elif user.player_tag and crud.check_pending_invite(db, current.id, user.player_tag):
+        status_val = "pending"
+    else:
+        status_val = "none"
+        
+    user.friendship_status = status_val
     return user
 
 @app.get("/matches", response_model=List[schemas.MatchResponse])
-def get_matches(current: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_matches(
+    skip: int = 0,
+    limit: int = 50,
+    current: models.User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
     if not current.player_tag: return []
-    return crud.get_matches_for_player(db, current.player_tag)
+    return crud.get_matches_for_player(db, current.player_tag, skip=skip, limit=limit)
 
 @app.get("/users/{user_id}/matches", response_model=List[schemas.MatchResponse])
-def get_user_matches(user_id: int, current: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_user_matches(
+    user_id: int, 
+    skip: int = 0,
+    limit: int = 50,
+    current: models.User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if not user.player_tag:
         return []
-    return crud.get_matches_for_player(db, user.player_tag)
+        
+    return crud.get_matches_for_player(db, user.player_tag, skip=skip, limit=limit)
 
 @app.get("/feed", response_model=List[schemas.MatchResponse])
-def get_social_feed(current: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return crud.get_social_feed(db, current)
+def get_social_feed(
+    skip: int = 0,
+    limit: int = 20,
+    current: models.User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    return crud.get_social_feed(db, current, skip=skip, limit=limit)
 
 @app.post("/users/onboarding", response_model=schemas.UserResponse)
 def complete_onboarding(current: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     current.onboarding_completed = True
     db.commit()
     db.refresh(current)
+    current.friendship_status = "self"
     return current
 
 # Manual Sync Rate Limit
@@ -445,13 +475,33 @@ def get_friends(uid: int, current: models.User = Depends(get_current_user), db: 
     ids = [f.user_id_2 if f.user_id_1 == uid else f.user_id_1 for f in fs]
     return db.query(models.User).filter(models.User.id.in_(ids)).all()
 
+# --- Routes: Stats ---
+@app.get("/stats/leaderboard", response_model=schemas.LeaderboardResponse)
+def get_leaderboard(current: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return crud.get_leaderboard_stats(db, current)
+
+@app.get("/stats/h2h/{friend_id}", response_model=schemas.H2HStatsResponse)
+def get_h2h(friend_id: int, current: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    friend = db.query(models.User).filter(models.User.id == friend_id).first()
+    if not friend:
+        raise HTTPException(404, "Friend not found")
+        
+    stats = crud.get_h2h_stats(db, current, friend)
+    if not stats:
+        # Fallback if no tags linked yet
+        return schemas.H2HStatsResponse(
+            friend_username=friend.username,
+            total_matches=0, win_rate=0.0, total_crowns_user=0, total_crowns_friend=0,
+            streak="None", last_5_results=[]
+        )
+    return stats
+
 @app.post("/feedback", response_model=schemas.FeedbackResponse)
 def create_feedback(
     feedback: schemas.FeedbackCreate, 
     current: models.User = Depends(get_current_user), 
     db: Session = Depends(get_db)
 ):
-    # Basic rate limiting could go here, skipping for beta
     db_feedback = models.Feedback(
         user_id=current.id,
         feedback_type=feedback.feedback_type,

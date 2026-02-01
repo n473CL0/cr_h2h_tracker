@@ -16,6 +16,7 @@ class User(Base):
     trophies = Column(Integer, default=0)
     clan_name = Column(String(100), nullable=True)
     
+    # NEW: Onboarding tracking
     onboarding_completed = Column(Boolean, default=False, nullable=False)
 
     invites = relationship("Invite", back_populates="creator")
