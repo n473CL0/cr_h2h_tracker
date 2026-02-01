@@ -39,7 +39,7 @@ const Layout = ({ user, onLogout }) => {
           </div>
        </header>
 
-       <main className="flex-1 w-full max-w-7xl mx-auto md:p-6 pb-24 md:pb-6">
+       <main className="flex-1 w-full max-w-7xl mx-auto p-4 md:p-6 pb-24 md:pb-6">
         <Outlet />
       </main>
 

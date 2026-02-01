@@ -35,7 +35,7 @@ const SignupForm = ({ onSignupSuccess, onSwitchToLogin }) => {
       
       // 2. Auto-Login to get JWT
       const loginData = await api.login(formData.username, formData.password);
-      localStorage.setItem('clash_user', JSON.stringify(loginData));
+      onSignupSuccess(loginData.access_token);
       
       // 3. CRITICAL FIX: Link the Player Tag now that we are logged in
       try {
